@@ -6,11 +6,11 @@
 #include <fcntl.h>
 
 #define CMDLINE_MAX 512
-#define ARG_MAX 17
+#define AARG_MAX 18
 #define CMD_MAX 4
 
 typedef struct {
-    char *args[ARG_MAX];
+    char *args[AARG_MAX];
     int argc;
 } Command;
 
@@ -54,8 +54,6 @@ int main(void)
     char  bg_cmd[CMDLINE_MAX] = "";
 
     while(1){
-        check_bg_jobs(&bg_ct, bg_pids, bg_retvals, bg_cmd);
-
         /* Print prompt */
         printf("sshell@ucd$ ");
         fflush(stdout);
@@ -75,10 +73,14 @@ int main(void)
         char *nl = strchr(cmd, '\n');
         if (nl) *nl = '\0';
 
+        check_bg_jobs(&bg_ct, bg_pids, bg_retvals, bg_cmd);
+
         /* Builtin exit */
         if (strcmp(cmd, "exit") == 0) {
+            check_bg_jobs(&bg_ct, bg_pids, bg_retvals, bg_cmd);
             if (bg_ct > 0) {
                 fprintf(stderr, "Error: active job still running\n");
+                fprintf(stderr, "+ completed 'exit' [1]\n");
                 continue;
             }
             fprintf(stderr, "Bye...\n");
@@ -95,6 +97,11 @@ int main(void)
         int is_background = 0;
         size_t len = strlen(cmd);
         if (len > 0 && cmd[len-1] == '&') {
+            check_bg_jobs(&bg_ct, bg_pids, bg_retvals, bg_cmd);
+            if(bg_ct > 0) {
+                fprintf(stderr, "Error: active job still running\n");
+                continue;
+            }
             is_background = 1;
             cmd[--len] = '\0';
             if (len > 0 && cmd[len-1] == ' ') cmd[--len] = '\0';
@@ -112,7 +119,7 @@ int main(void)
             fprintf(stderr, "+ completed '%s' [%d]\n", cmd_copy, ret);
             continue;
         }
-        if (strncmp(cmd, "cd ", 3) == 0) {
+        if (strncmp(cmd, "cd", 2) == 0) {
             char *dest = cmd + 3;
             int ret = chdir(dest) ? 1 : 0;
             if (ret) fprintf(stderr, "Error: cannot cd into directory\n");
@@ -132,6 +139,7 @@ int main(void)
             char *e = strchr(output_file, ' ');
             if (e) 
                 *e = '\0';
+            if (*output_file=='\0') { fprintf(stderr,"Error: no output file\n"); continue; }
         }
         if ((p = strchr(cmd, '<'))) {
             *p = '\0'; 
@@ -141,10 +149,66 @@ int main(void)
             char *e = strchr(input_file, ' ');
             if (e) 
                 *e = '\0';
+             if (*input_file=='\0') { fprintf(stderr,"Error: no input file\n"); continue; }
+        }
+
+        if (output_file) {
+            char *p_orig = strchr(cmd_copy, '>');
+            char *last_pipe = strrchr(cmd_copy, '|');
+            if (last_pipe && p_orig < last_pipe) {
+                fprintf(stderr, "Error: mislocated output redirection\n");
+                continue;
+            }
+            
+            if (!last_pipe) {
+                last_pipe = cmd_copy;
+            }
+            char *check = last_pipe;
+            while (check < p_orig) {
+                if (*check != ' ' && *check != '|') {
+                    break;
+                }
+                check++;
+            }
+            if (check == p_orig) {
+                fprintf(stderr, "Error: missing command\n");
+                continue;
+            }
+        }
+        if (input_file) {
+            char *p_in = strchr(cmd_copy, '<');
+            char *first_pipe = strchr(cmd_copy, '|');
+            if (first_pipe && p_in > first_pipe) {
+                fprintf(stderr, "Error: mislocated input redirection\n");
+                continue;
+            }
+            char *check = cmd_copy;
+            while (check < p_in) {
+                if (*check != ' ') {
+                    break;
+                }
+                check++;
+            }
+            if (check == p_in) {
+                fprintf(stderr, "Error: missing command\n");
+                continue;
+            }
+        }
+
+        char tmp[CMDLINE_MAX]; 
+        strncpy(tmp, cmd, CMDLINE_MAX);
+        // trim spaces
+        char *ts = tmp; while (*ts==' ') ts++;
+        char *te = ts + strlen(ts) - 1;
+        while (te>ts && *te==' ') *te--='\0';
+        if (ts[0]=='|' || *te=='|' || strstr(ts, "||")) {
+            fprintf(stderr, "Error: missing command\n");
+            continue;
         }
 
         char *saveptr1;
         char *seg = strtok_r(cmd, "|", &saveptr1);
+        int error = 0;
         while (seg && ncmd < CMD_MAX) {
             while (*seg == ' ') seg++;
             int L = strlen(seg);
@@ -152,18 +216,27 @@ int main(void)
             cmds[ncmd].argc = 0;
             char *saveptr2;
             char *tok = strtok_r(seg, " ", &saveptr2);
-            while (tok && cmds[ncmd].argc < ARG_MAX-1) {
+            while (tok) {
                 cmds[ncmd].args[cmds[ncmd].argc++] = tok;
                 tok = strtok_r(NULL, " ", &saveptr2);
+                if (cmds[ncmd].argc >= AARG_MAX-1) {
+                    fprintf(stderr, "Error: too many process arguments\n");
+                    error = 1;
+                    break;
+                }
             }
+            if (error) break;
             cmds[ncmd].args[cmds[ncmd].argc] = NULL;
             if (cmds[ncmd].argc == 0) {
                 fprintf(stderr, "Error: missing command\n");
+                error = 1;
                 break;
             }
             ncmd++;
             seg = strtok_r(NULL, "|", &saveptr1);
         }
+
+        if(error) continue;
 
         if (seg) { 
             fprintf(stderr, "Error: too many commands\n"); 
@@ -177,6 +250,18 @@ int main(void)
             fprintf(stderr, "Error: mislocated input redirection\n"); 
             continue; 
         }
+
+        if (input_file) {
+            int fd = open(input_file, O_RDONLY);
+            if (fd < 0) { fprintf(stderr, "Error: cannot open input file\n"); continue; }
+            close(fd);
+        }
+        if (output_file) {
+            int fd = open(output_file, O_WRONLY|O_CREAT|O_TRUNC, 0644);
+            if (fd < 0) { fprintf(stderr, "Error: cannot open output file\n"); continue; }
+            close(fd);
+        }
+
         int pipes[CMD_MAX-1][2];
         for (int i=0; i<ncmd-1; i++) 
             if (pipe(pipes[i])<0){
@@ -189,19 +274,11 @@ int main(void)
             if ((pids[i]=fork())==0) {
                 if (i==0 && input_file) {
                     int fd=open(input_file,O_RDONLY);
-                    if(fd<0){
-                        fprintf(stderr,"Error: cannot open input file\n");
-                        exit(1);
-                    } 
                     dup2(fd,STDIN_FILENO); 
                     close(fd);
                 }
                 if (i==ncmd-1 && output_file) {
                     int fd=open(output_file,O_WRONLY|O_CREAT|O_TRUNC,0644);
-                    if(fd<0){
-                        fprintf(stderr,"Error: cannot open output file\n");
-                        exit(1);
-                    } 
                     dup2(fd,STDOUT_FILENO); 
                     close(fd);
                 }
