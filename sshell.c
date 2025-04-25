@@ -236,7 +236,7 @@ int main(void)
         }
 
         check_bg_jobs(&bg_ct, bg_pids, bg_retvals, bg_cmd);
-        fprintf(stderr,"+ completed '%s'",cmd_copy);
+        fprintf(stderr,"+ completed '%s' ",cmd_copy);
         for(int i=0;i<ncmd;i++) fprintf(stderr,"[%d]",retvals[i]);
         fprintf(stderr,"\n");
     }
