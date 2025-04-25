@@ -89,7 +89,6 @@ int main(void)
         if (strlen(cmd) == 0)
             continue;
 
-
         char cmd_copy[CMDLINE_MAX];
         strncpy(cmd_copy, cmd, CMDLINE_MAX);
 
@@ -121,7 +120,6 @@ int main(void)
             continue;
         }
 
-
         Command cmds[CMD_MAX];
         int ncmd = 0;
         char *input_file = NULL, *output_file = NULL;
@@ -144,19 +142,19 @@ int main(void)
             if (e) 
                 *e = '\0';
         }
-        char *seg = strtok(cmd, "|");
+
+        char *saveptr1;
+        char *seg = strtok_r(cmd, "|", &saveptr1);
         while (seg && ncmd < CMD_MAX) {
-            while (*seg == ' ') 
-                seg++;
+            while (*seg == ' ') seg++;
             int L = strlen(seg);
-            while (L>0 && seg[L-1]==' ') 
-                seg[--L]='\0';
-            
+            while (L>0 && seg[L-1]==' ') seg[--L]='\0';
             cmds[ncmd].argc = 0;
-            char *tok = strtok(seg, " ");
+            char *saveptr2;
+            char *tok = strtok_r(seg, " ", &saveptr2);
             while (tok && cmds[ncmd].argc < ARG_MAX-1) {
                 cmds[ncmd].args[cmds[ncmd].argc++] = tok;
-                tok = strtok(NULL, " ");
+                tok = strtok_r(NULL, " ", &saveptr2);
             }
             cmds[ncmd].args[cmds[ncmd].argc] = NULL;
             if (cmds[ncmd].argc == 0) {
@@ -164,8 +162,9 @@ int main(void)
                 break;
             }
             ncmd++;
-            seg = strtok(NULL, "|");
+            seg = strtok_r(NULL, "|", &saveptr1);
         }
+
         if (seg) { 
             fprintf(stderr, "Error: too many commands\n"); 
             continue; 
@@ -178,7 +177,6 @@ int main(void)
             fprintf(stderr, "Error: mislocated input redirection\n"); 
             continue; 
         }
-
         int pipes[CMD_MAX-1][2];
         for (int i=0; i<ncmd-1; i++) 
             if (pipe(pipes[i])<0){
@@ -232,14 +230,14 @@ int main(void)
         }
         int retvals[CMD_MAX];
         for(int i=0;i<ncmd;i++){
-            int st; waitpid(pids[i],&st,0);
+            int st; 
+            waitpid(pids[i],&st,0);
             retvals[i] = WIFEXITED(st) ? WEXITSTATUS(st) : 1;
         }
 
         check_bg_jobs(&bg_ct, bg_pids, bg_retvals, bg_cmd);
-
         fprintf(stderr,"+ completed '%s'",cmd_copy);
-        for(int i=0;i<ncmd;i++) fprintf(stderr," [%d]",retvals[i]);
+        for(int i=0;i<ncmd;i++) fprintf(stderr,"[%d]",retvals[i]);
         fprintf(stderr,"\n");
     }
     return EXIT_SUCCESS;
