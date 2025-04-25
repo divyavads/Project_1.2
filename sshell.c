@@ -34,7 +34,7 @@ void check_bg_jobs(int *bg_ct, pid_t bg_pids[], int bg_retvals[], char bg_cmd[])
         }
     }
     if (all_done) {
-        fprintf(stderr, "+ completed '%s'", bg_cmd);
+        fprintf(stderr, "+ completed '%s' ", bg_cmd);
         for (int i = 0; i < *bg_ct; i++) {
             fprintf(stderr, "[%d]", bg_retvals[i]);
         }
